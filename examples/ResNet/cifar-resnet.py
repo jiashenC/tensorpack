@@ -36,9 +36,10 @@ NUM_UNITS = None
 
 class Model(ModelDesc):
 
-    def __init__(self, n):
+    def __init__(self, n, cifar_classnum):
         super(Model, self).__init__()
         self.n = n
+        self.cifar_classnum = cifar_classnum
 
     def _get_inputs(self):
         return [InputDesc(tf.float32, [None, 32, 32, 3], 'input'),
@@ -93,7 +94,7 @@ class Model(ModelDesc):
             # 8,c=64
             l = GlobalAvgPooling('gap', l)
 
-        logits = FullyConnected('linear', l, out_dim=10, nl=tf.identity)
+        logits = FullyConnected('linear', l, out_dim=self.cifar_classnum, nl=tf.identity)
         prob = tf.nn.softmax(logits, name='output')
 
         cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=label)
@@ -118,9 +119,13 @@ class Model(ModelDesc):
         return opt
 
 
-def get_data(train_or_test):
+def get_data(train_or_test, cifar_classnum):
     isTrain = train_or_test == 'train'
-    ds = dataset.Cifar10(train_or_test)
+    ds = None
+    if cifar_classnum == 10:    
+        ds = dataset.Cifar10(train_or_test)
+    else:
+        ds = dataset.Cifar100(train_or_test)
     pp_mean = ds.get_per_pixel_mean()
     if isTrain:
         augmentors = [
@@ -140,10 +145,10 @@ def get_data(train_or_test):
     return ds
 
 
-def get_config():
+def get_config(cifar_classnum):
     logger.auto_set_dir()
-    dataset_train = get_data('train')
-    dataset_test = get_data('test')
+    dataset_train = get_data('train', cifar_classnum)
+    dataset_test = get_data('test', cifar_classnum)
 
     return TrainConfig(
         dataflow=dataset_train,
@@ -154,7 +159,7 @@ def get_config():
             ScheduledHyperParamSetter('learning_rate',
                                       [(1, 0.1), (82, 0.01), (123, 0.001), (300, 0.0002)])
         ],
-        model=Model(n=NUM_UNITS),
+        model=Model(n=NUM_UNITS, cifar_classnum=cifar_classnum),
         max_epoch=400,
     )
 
@@ -166,13 +171,17 @@ if __name__ == '__main__':
                         help='number of units in each stage',
                         type=int, default=18)
     parser.add_argument('--load', help='load model')
+    parser.add_argument('--classnum', help='specify cifar10 or cifar100')
     args = parser.parse_args()
     NUM_UNITS = args.num_units
 
     if args.gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
-
-    config = get_config()
+    if args.classnum:
+        cifar_classnum = int(args.classnum)
+    else:
+        cifar_classnum = 10
+    config = get_config(cifar_classnum)
     if args.load:
         config.session_init = SaverRestore(args.load)
     if args.gpu:
